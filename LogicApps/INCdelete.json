@@ -1,0 +1,354 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "workflows_Aruga_MDR_Hygine_name": {
+      "defaultValue": "[concat('/subscriptions/', 'subscription().SubscriptionID', '/providers/Microsoft.Web/locations/', 'resourceGroup().location', '/managedApis/Aruga-MDR-Hygine')]",
+      "type": "String"
+    },
+    "connections_keyvault_1_externalid": {
+      "defaultValue": "[concat('/subscriptions/', 'subscription().SubscriptionID', '/providers/Microsoft.Web/locations/', 'resourceGroup().location', '/managedApis/keyvault-1')]",
+      "type": "String"
+    },
+    "userAssignedIdentities_ArugaCyber_UserManagedID_externalid": {
+      "defaultValue": "[concat('/subscriptions/', 'subscription().SubscriptionID', '/providers/Microsoft.Web/locations/', 'resourceGroup().location', '/managedApis/ArugaCyber-UserManagedID')]",
+      "type": "String"
+    }
+  },
+  "variables": {},
+  "resources": [
+    {
+      "type": "Microsoft.Logic/workflows",
+      "apiVersion": "2017-07-01",
+      "name": "[parameters('workflows_Aruga_MDR_Hygine_name')]",
+      "location": "uksouth",
+      "identity": {
+        "type": "UserAssigned",
+        "userAssignedIdentities": {
+          "/subscriptions/23c90a0f-9d57-4ab9-8ee4-48a134d27103/resourceGroups/ArugaCyber-MDR-ArugaCyber/providers/Microsoft.ManagedIdentity/userAssignedIdentities/ArugaCyber-UserManagedID": {}
+        }
+      },
+      "properties": {
+        "state": "Enabled",
+        "definition": {
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "contentVersion": "1.0.0.0",
+          "parameters": {
+            "$connections": {
+              "defaultValue": {},
+              "type": "Object"
+            },
+            "RG": {
+              "defaultValue": "arugacyber-mdr-arugacyber",
+              "type": "String"
+            },
+            "Subscription": {
+              "defaultValue": "23c90a0f-9d57-4ab9-8ee4-48a134d27103",
+              "type": "String"
+            },
+            "Workspace": {
+              "defaultValue": "ArugaCyber-MDR-ArugaCyber",
+              "type": "String"
+            }
+          },
+          "triggers": {
+            "Recurrence": {
+              "recurrence": {
+                "frequency": "Week",
+                "interval": 1,
+                "schedule": {
+                  "weekDays": [
+                    "Monday"
+                  ]
+                }
+              },
+              "evaluatedRecurrence": {
+                "frequency": "Week",
+                "interval": 1,
+                "schedule": {
+                  "weekDays": [
+                    "Monday"
+                  ]
+                }
+              },
+              "type": "Recurrence"
+            }
+          },
+          "actions": {
+            "Incidents": {
+              "runAfter": {},
+              "type": "InitializeVariable",
+              "inputs": {
+                "variables": [
+                  {
+                    "name": "Incidents",
+                    "type": "array"
+                  }
+                ]
+              }
+            },
+            "Sentinel_Client_ID": {
+              "runAfter": {
+                "Incidents": [
+                  "Succeeded"
+                ]
+              },
+              "type": "ApiConnection",
+              "inputs": {
+                "host": {
+                  "connection": {
+                    "name": "@parameters('$connections')['keyvault_1']['connectionId']"
+                  }
+                },
+                "method": "get",
+                "path": "/secrets/@{encodeURIComponent('ArugaCyber-Sentinel-ClientID')}/value"
+              }
+            },
+            "Sentinel_Secret": {
+              "runAfter": {
+                "Incidents": [
+                  "Succeeded"
+                ]
+              },
+              "type": "ApiConnection",
+              "inputs": {
+                "host": {
+                  "connection": {
+                    "name": "@parameters('$connections')['keyvault_1']['connectionId']"
+                  }
+                },
+                "method": "get",
+                "path": "/secrets/@{encodeURIComponent('ArugaCyber-Sentinel-Secret')}/value"
+              }
+            },
+            "Tenant_ID": {
+              "runAfter": {
+                "Incidents": [
+                  "Succeeded"
+                ]
+              },
+              "type": "ApiConnection",
+              "inputs": {
+                "host": {
+                  "connection": {
+                    "name": "@parameters('$connections')['keyvault_1']['connectionId']"
+                  }
+                },
+                "method": "get",
+                "path": "/secrets/@{encodeURIComponent('ArugaCyber-TenantID')}/value"
+              }
+            },
+            "bearerToken": {
+              "runAfter": {
+                "Sentinel_Client_ID": [
+                  "Succeeded"
+                ],
+                "Sentinel_Secret": [
+                  "Succeeded"
+                ],
+                "Tenant_ID": [
+                  "Succeeded"
+                ]
+              },
+              "type": "Http",
+              "inputs": {
+                "body": "grant_type=client_credentials&client_id=@{body('Sentinel_Client_ID')?['value']}&resource=https://management.azure.com&client_secret=@{body('Sentinel_Secret')?['value']}",
+                "headers": {
+                  "Content-Type": "application/x-www-form-urlencoded"
+                },
+                "method": "POST",
+                "uri": "https://login.microsoftonline.com/@{body('Tenant_ID')?['value']}/oauth2/token?="
+              }
+            },
+            "deleteForEachID": {
+              "foreach": "@body('selectIncidentIDs')",
+              "actions": {
+                "deleteIncidents": {
+                  "runAfter": {},
+                  "type": "Http",
+                  "inputs": {
+                    "headers": {
+                      "Authorization": "Bearer @{body('parseBearer')?['access_token']}"
+                    },
+                    "method": "DELETE",
+                    "uri": "https://management.azure.com/subscriptions/@{parameters('Subscription')}/resourceGroups/@{parameters('RG')}/providers/Microsoft.OperationalInsights/workspaces/@{parameters('Workspace')}/providers/Microsoft.SecurityInsights/Incidents/@{item()}?api-version=2022-07-01-preview"
+                  }
+                }
+              },
+              "runAfter": {
+                "selectIncidentIDs": [
+                  "Succeeded"
+                ]
+              },
+              "type": "Foreach"
+            },
+            "filterAutomationFailureAlerts": {
+              "runAfter": {
+                "forEachIncident": [
+                  "Succeeded"
+                ]
+              },
+              "type": "Query",
+              "inputs": {
+                "from": "@variables('Incidents')",
+                "where": "@startswith(item(), 'Automation Failure')\n"
+              }
+            },
+            "forEachIncident": {
+              "foreach": "@body('parseIncidents')?['value']",
+              "actions": {
+                "appendIncidents": {
+                  "runAfter": {},
+                  "type": "AppendToArrayVariable",
+                  "inputs": {
+                    "name": "Incidents",
+                    "value": "@{items('forEachIncident')?['properties']?['title']}|@{items('forEachIncident')?['name']}"
+                  }
+                }
+              },
+              "runAfter": {
+                "parseIncidents": [
+                  "Succeeded"
+                ]
+              },
+              "type": "Foreach"
+            },
+            "getIncidents": {
+              "runAfter": {
+                "parseBearer": [
+                  "Succeeded"
+                ]
+              },
+              "type": "Http",
+              "inputs": {
+                "headers": {
+                  "Authorization": "Bearer @{body('parseBearer')?['access_token']}"
+                },
+                "method": "GET",
+                "uri": "https://management.azure.com/subscriptions/@{parameters('Subscription')}/resourceGroups/@{parameters('RG')}/providers/Microsoft.OperationalInsights/workspaces/@{parameters('Workspace')}/providers/Microsoft.SecurityInsights/incidents?$top=500&api-version=2022-07-01-preview"
+              }
+            },
+            "parseBearer": {
+              "runAfter": {
+                "bearerToken": [
+                  "Succeeded"
+                ]
+              },
+              "type": "ParseJson",
+              "inputs": {
+                "content": "@body('bearerToken')",
+                "schema": {
+                  "properties": {
+                    "access_token": {
+                      "type": "string"
+                    },
+                    "expires_in": {
+                      "type": "string"
+                    },
+                    "expires_on": {
+                      "type": "string"
+                    },
+                    "ext_expires_in": {
+                      "type": "string"
+                    },
+                    "not_before": {
+                      "type": "string"
+                    },
+                    "resource": {
+                      "type": "string"
+                    },
+                    "token_type": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "parseIncidents": {
+              "runAfter": {
+                "getIncidents": [
+                  "Succeeded"
+                ]
+              },
+              "type": "ParseJson",
+              "inputs": {
+                "content": "@body('getIncidents')",
+                "schema": {
+                  "properties": {
+                    "value": {
+                      "items": {
+                        "properties": {
+                          "etag": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "properties": {
+                            "properties": {
+                              "title": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "etag",
+                          "type",
+                          "properties"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "selectIncidentIDs": {
+              "runAfter": {
+                "filterAutomationFailureAlerts": [
+                  "Succeeded"
+                ]
+              },
+              "type": "Select",
+              "inputs": {
+                "from": "@body('filterAutomationFailureAlerts')",
+                "select": "@split(item(), '|')[1]\r\n"
+              }
+            }
+          },
+          "outputs": {}
+        },
+        "parameters": {
+          "$connections": {
+            "value": {
+              "keyvault_1": {
+                "connectionId": "[parameters('connections_keyvault_1_externalid')]",
+                "connectionName": "keyvault-1",
+                "connectionProperties": {
+                  "authentication": {
+                    "identity": "[parameters('userAssignedIdentities_ArugaCyber_UserManagedID_externalid')]",
+                    "type": "ManagedServiceIdentity"
+                  }
+                },
+                "id": "[concat('/subscriptions/', 'subscription().SubscriptionID', '/providers/Microsoft.Web/locations/', 'resourceGroup().location', '/managedApis/keyvault')]"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

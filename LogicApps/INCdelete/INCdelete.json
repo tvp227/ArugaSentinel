@@ -25,7 +25,7 @@
       "identity": {
         "type": "UserAssigned",
         "userAssignedIdentities": {
-          "/subscriptions/23c90a0f-9d57-4ab9-8ee4-48a134d27103/resourceGroups/ArugaCyber-MDR-ArugaCyber/providers/Microsoft.ManagedIdentity/userAssignedIdentities/ArugaCyber-UserManagedID": {}
+          "[concat('/subscriptions/', 'subscription().SubscriptionID', '/providers/Microsoft.Web/locations/', 'resourceGroup().location', '/managedApis/ArugaCyber-UserManagedID')]": {}
         }
       },
       "properties": {
